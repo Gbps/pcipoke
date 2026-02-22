@@ -34,7 +34,7 @@ struct Cli {
     #[arg(short = 's', long, default_value = "4", value_parser = parse_read_size)]
     read_size: usize,
 
-    /// Size of the MMIO write in bytes (1, 2, or 4 — max 32-bit)
+    /// Size of the MMIO write in bytes (1, 2, 4, or 8)
     #[arg(short = 'w', long, default_value = "4", value_parser = parse_write_size)]
     write_size: usize,
 }
@@ -59,8 +59,8 @@ fn parse_read_size(s: &str) -> Result<usize, String> {
 fn parse_write_size(s: &str) -> Result<usize, String> {
     let n: usize = s.parse().map_err(|e| format!("invalid number: {e}"))?;
     match n {
-        1 | 2 | 4 => Ok(n),
-        _ => Err("write size must be 1, 2, or 4".to_string()),
+        1 | 2 | 4 | 8 => Ok(n),
+        _ => Err("write size must be 1, 2, 4, or 8".to_string()),
     }
 }
 
@@ -72,12 +72,12 @@ fn parse_count(s: &str) -> Result<usize, String> {
     }
 }
 
-fn parse_hex_u32(s: &str) -> Result<u32, String> {
+fn parse_hex_u64(s: &str) -> Result<u64, String> {
     let hex = s
         .strip_prefix("0x")
         .or_else(|| s.strip_prefix("0X"))
         .unwrap_or(s);
-    u32::from_str_radix(hex, 16).map_err(|e| format!("invalid hex data: {e}"))
+    u64::from_str_radix(hex, 16).map_err(|e| format!("invalid hex data: {e}"))
 }
 
 /// Validate and normalize a PCI address to DDDD:BB:DD.F form.
@@ -236,7 +236,7 @@ fn read_resource(addr: &str, bar_num: usize, offset: usize, count: usize, read_s
 }
 
 /// mmap resource with write access and issue a single volatile write of `write_size` width.
-fn write_resource(addr: &str, bar_num: usize, offset: usize, data: u32, write_size: usize) -> Result<()> {
+fn write_resource(addr: &str, bar_num: usize, offset: usize, data: u64, write_size: usize) -> Result<()> {
     let path = PathBuf::from(format!("/sys/bus/pci/devices/{addr}/resource{bar_num}"));
 
     if !path.exists() {
@@ -263,7 +263,8 @@ fn write_resource(addr: &str, bar_num: usize, offset: usize, data: u32, write_si
         match write_size {
             1 => std::ptr::write_volatile(base, data as u8),
             2 => std::ptr::write_volatile(base as *mut u16, data as u16),
-            4 => std::ptr::write_volatile(base as *mut u32, data),
+            4 => std::ptr::write_volatile(base as *mut u32, data as u32),
+            8 => std::ptr::write_volatile(base as *mut u64, data as u64),
             _ => unreachable!(),
         }
     }
@@ -271,7 +272,7 @@ fn write_resource(addr: &str, bar_num: usize, offset: usize, data: u32, write_si
     Ok(())
 }
 
-// ── Hexdump rendering ───────────────────────────────────────────────
+// -- Hexdump rendering -----------------------------------------------
 
 fn color_byte_hex(b: u8) -> colored::ColoredString {
     let s = format!("{b:02x}");
@@ -333,7 +334,7 @@ fn hexdump(data: &[u8], base_offset: usize) {
     println!("{}", format!("{end:08x}").blue().bold());
 }
 
-// ── Main ────────────────────────────────────────────────────────────
+// -- Main ------------------------------------------------------------
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -368,12 +369,12 @@ fn main() -> Result<()> {
         }
 
         'w' => {
-            let data = parse_hex_u32(&cli.operand)
+            let data = parse_hex_u64(&cli.operand)
                 .map_err(|e| anyhow::anyhow!("invalid DATA: {e}"))?;
 
             // Validate data fits in the requested write width.
-            if cli.write_size < 4 {
-                let max = (1u32 << (cli.write_size * 8)) - 1;
+            if cli.write_size < 8 {
+                let max = (1u64 << (cli.write_size * 8)) - 1;
                 if data > max {
                     bail!(
                         "Data value {:#x} does not fit in {} byte(s) (max {:#x})",
