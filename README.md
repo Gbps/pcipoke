@@ -2,7 +2,7 @@
 
 A small userspace-only Linux command-line tool for reading and writing PCI device BAR (Base Address Register) memory directly using the kernel's sysfs interface.
 
-All accesses are performed with fixed length `mmap` and `volatile` loads/stores which ensures correct operation when spanning alignment.
+All accesses are performed with fixed length `mmap` and `volatile` loads/stores which ensures correct size access and alignment.
 
 This tool is useful for working with devices like FPGAs without needing to write a Linux device driver.
 
